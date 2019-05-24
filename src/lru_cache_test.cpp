@@ -216,6 +216,36 @@ TEST(LruCacheTest, Evict_size)
     ASSERT_EQ(cache.evict_count(), 2);
 }
 
+TEST(LruCacheTest, Evict_size_2)
+{
+    lru_cache<int, std::string> cache(SIZE_MAX, 3);
+    lru_cache<int, std::string>::const_iterator value_iter = cache.cend();
+
+    cache.insert(1, "111");
+    cache.insert(2, "22");
+
+    value_iter = cache.find(1);
+    ASSERT_EQ(value_iter, cache.cend());
+
+    cache.insert(3, "33");
+    EXPECT_TRUE(cache.contains(2));
+    ASSERT_NE(cache.find(2), cache.cend());
+
+    cache.insert(4, "44");
+    EXPECT_TRUE(cache.contains(2));
+    ASSERT_EQ(cache.find(3), cache.cend());
+
+    value_iter = cache.find(2);
+    ASSERT_NE(value_iter, cache.cend());
+    ASSERT_EQ(value_iter->second, "22");
+
+    value_iter = cache.find(4);
+    ASSERT_NE(value_iter, cache.cend());
+    ASSERT_EQ(value_iter->second, "44");
+
+    ASSERT_EQ(cache.evict_count(), 2);
+}
+
 
 TEST(LruCacheTest, ToString)
 {
