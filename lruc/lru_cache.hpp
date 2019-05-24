@@ -21,149 +21,173 @@ under the License. */
 #include <list>
 #include <sstream>
 #include <unordered_map>
+#include <functional>
 
-namespace lruc
-{
-	template < class Key, class T >
-	class lru_cache
-	{
-		typedef std::pair<Key, T>								data_value_type;
-		typedef std::list<data_value_type>						data_container;
-		typedef typename data_container::iterator				data_iterator;
+namespace lruc {
+    template<class Key, class T>
+    class lru_cache {
+        typedef std::pair<Key, T> data_value_type;
+        typedef std::list<data_value_type> data_container;
+        typedef typename data_container::iterator data_iterator;
 
-		typedef std::unordered_map<Key, data_iterator>			key_container;
-		typedef typename key_container::const_iterator			key_iterator;
-
-
-		size_t						_max_size;
-		mutable data_container		_data;
-		key_container				_keys;
-
-		mutable size_t				_hit_count;
-		mutable size_t				_miss_count;
-		size_t						_insert_count;
-		size_t						_evict_count;
-
-	public:
-		typedef typename data_container::const_iterator			const_iterator;
-
-		explicit lru_cache(size_t max_size)
-			: _max_size(max_size),
-			_hit_count(0),
-			_miss_count(0),
-			_insert_count(0),
-			_evict_count(0)
-		{ assert(max_size); }
+        typedef std::unordered_map<Key, data_iterator> key_container;
+        typedef typename key_container::const_iterator key_iterator;
 
 
-		lru_cache(const lru_cache&) = delete;
+        size_t _max_size;
+        size_t _max_value_size;
+        mutable data_container _data;
+        key_container _keys;
+
+        mutable size_t _hit_count;
+        mutable size_t _miss_count;
+        size_t _insert_count;
+        size_t _evict_count;
+        size_t _total_value_size;
+
+    public:
+        typedef typename data_container::const_iterator const_iterator;
+
+        explicit lru_cache(size_t max_size, size_t max_value_size = SIZE_MAX)
+                : _max_size(max_size),
+                  _max_value_size(max_value_size),
+                  _hit_count(0),
+                  _miss_count(0),
+                  _insert_count(0),
+                  _evict_count(0),
+                  _total_value_size(0) {
+            assert(max_size);
+            assert(max_value_size);
+        }
 
 
-		lru_cache& operator=(const lru_cache&) = delete;
+        lru_cache(const lru_cache &) = delete;
 
 
-		void insert(const Key& key, const T& value)
-		{
-			const key_iterator key_iter = _keys.find(key);
-
-			if (key_iter != _keys.end())
-			{
-				key_iter->second->second = value;
-
-				_data.splice(_data.begin(), _data, key_iter->second);
-			}
-			else
-			{
-				if (_data.size() == _max_size)
-				{
-					const data_value_type& value_iter = _data.back();
-
-					_keys.erase(value_iter.first);
-					_data.pop_back();
-
-					++_evict_count;
-				}
-
-				_data.emplace_front(key, value);
-
-				_keys[key] = _data.begin();
-			}
-
-			++_insert_count;
-		}
+        lru_cache &operator=(const lru_cache &) = delete;
 
 
-		const_iterator find(const Key& key) const
-		{
-			const key_iterator key_iter = _keys.find(key);
+        void insert(const Key &key, const T &value) {
+            const key_iterator key_iter = _keys.find(key);
 
-			if (key_iter == _keys.end())
-			{
-				++_miss_count;
+            if (key_iter != _keys.end()) {
+                size_t old_size = key_iter->second->second.size();
+                while (_total_value_size >= _max_value_size) {
+                    bool evict_ok = evict_last();
+                    if (!evict_ok)
+                        break;
+                }
+                key_iter->second->second = value;
+                _data.splice(_data.begin(), _data, key_iter->second);
+                _total_value_size += value.size();
+            } else {
+                while (_data.size() >= _max_size || _total_value_size >= _max_value_size) {
+                    bool evict_ok = evict_last();
+                    if (!evict_ok)
+                        break;
+                }
 
-				return cend();
-			}
+                _data.emplace_front(key, value);
+                _keys[key] = _data.begin();
+                _total_value_size += value.size();
+            }
 
-			_data.splice(_data.begin(), _data, key_iter->second);
-
-			++_hit_count;
-
-			return key_iter->second;
-		}
-
-
-		bool contains(const Key& key) const { return _keys.count(key); }
-
-
-		void remove(const Key& key)
-		{
-			const key_iterator& key_iter = _keys.find(key);
-
-			if (key_iter == _keys.end())
-				return;
-
-			_data.erase(key_iter->second);
-			_keys.erase(key_iter);
-
-			++_evict_count;
-		}
+            ++_insert_count;
+        }
 
 
-		void clear() noexcept
-		{
-			const size_t old_size = size();
+        const_iterator find(const Key &key) const {
+            const key_iterator key_iter = _keys.find(key);
 
-			_keys.clear();
-			_data.clear();
+            if (key_iter == _keys.end()) {
+                ++_miss_count;
 
-			_evict_count += old_size;
-		}
+                return cend();
+            }
 
+            _data.splice(_data.begin(), _data, key_iter->second);
 
-		size_t hit_count()		const noexcept { return _hit_count; }
-		size_t miss_count()		const noexcept { return _miss_count; }
-		size_t insert_count()	const noexcept { return _insert_count; }
-		size_t evict_count()	const noexcept { return _evict_count; }
+            ++_hit_count;
 
-
-		size_t max_size()		const noexcept { return _max_size; }
-		size_t size()			const noexcept { return _keys.size(); }
-		bool empty()			const noexcept { return _keys.empty(); }
+            return key_iter->second;
+        }
 
 
-		const_iterator cbegin() const noexcept { return _data.cbegin(); }
-		const_iterator cend()   const noexcept { return _data.cend(); }
+        bool contains(const Key &key) const { return _keys.count(key); }
 
 
-		std::string to_string() const
-		{
-			std::stringstream lru_cache_string;
+        void remove(const Key &key) {
+            const key_iterator &key_iter = _keys.find(key);
 
-			lru_cache_string << "lru_cache: { address: " << this << ", max_size: " << max_size() <<
-				", size: " << size() << ", hit_count: " << hit_count() << ", miss_count: " << miss_count() <<
-					", insert_count: " << insert_count() << ", evict_count: " << evict_count() << " }\n";
+            if (key_iter == _keys.end())
+                return;
 
-			return lru_cache_string.str();
-		}
-	};
+            _data.erase(key_iter->second);
+            _keys.erase(key_iter);
+
+            ++_evict_count;
+        }
+
+
+        void clear() noexcept {
+            const size_t old_size = size();
+
+            _keys.clear();
+            _data.clear();
+
+            _evict_count += old_size;
+        }
+
+
+        size_t hit_count() const noexcept { return _hit_count; }
+
+        size_t miss_count() const noexcept { return _miss_count; }
+
+        size_t insert_count() const noexcept { return _insert_count; }
+
+        size_t evict_count() const noexcept { return _evict_count; }
+
+
+        size_t max_size() const noexcept { return _max_size; }
+
+        size_t size() const noexcept { return _keys.size(); }
+
+        size_t value_size() const noexcept { return _total_value_size; }
+
+        bool empty() const noexcept { return _keys.empty(); }
+
+
+        const_iterator cbegin() const noexcept { return _data.cbegin(); }
+
+        const_iterator cend() const noexcept { return _data.cend(); }
+
+
+        std::string to_string() const {
+            std::stringstream lru_cache_string;
+
+            lru_cache_string << "lru_cache: { address: " << this << ", max_size: " << max_size() <<
+                             ", size: " << size() << ", value_size: " << value_size() << ", hit_count: " << hit_count()
+                             << ", miss_count: " << miss_count()
+                             << ", insert_count: " << insert_count() << ", evict_count: " << evict_count() << " }\n";
+
+            return lru_cache_string.str();
+        }
+
+    private:
+        // return true if the last one has been evict successfully, otherwise(e.g., empty), return false
+        bool evict_last() {
+            if (_data.size() > 0) {
+                const data_value_type &value_iter = _data.back();
+                _total_value_size -= value_iter.second.size();
+                _keys.erase(value_iter.first);
+                _data.pop_back();
+
+                ++_evict_count;
+
+            } else {
+                return false;
+            }
+            return true;
+        }
+    };
 }
